@@ -1,11 +1,23 @@
 library("RSelenium")
 library(stringi)
-library(readxl)
 library(rvest)
 library(dplyr)
 library(data.table)
+library(yaml)
 
-remDr = RSelenium::rsDriver(browser = "chrome")
+if(teste["sysname"] == "Windows"){
+  parameter_file = choose.files(default = "./parameters.yaml", caption = "Choose parameters YAML file", multi = F)
+} else if(teste["sysname"] == "Linux"){
+  parameter_file = file.choose()
+}
+
+parameters = read_yaml(parameter_file)
+output_path = parameters$output_path
+navigator = parameters$navigator
+
+output_path = ifelse(endsWith(output_path, "/"), output_path, paste0(output_path, "/"))  
+
+remDr = RSelenium::rsDriver(browser = navigator, check = F, version = "3.9.1")
 client = remDr$client
 
 baseURL = "http://postos.anp.gov.br"
@@ -61,7 +73,26 @@ lapply(2:28, function(uf_idx){
   old_uf_page_table = uf_page_table
 })
 
-files_full_path = list.files("~/Downloads/",full.names = T)[grepl("ANP.*xls",list.files("~/Downloads/"))]
+download_complete = F
+
+while(!download_complete){
+  tryCatch({
+    download_complete = ifelse(
+      sum(
+        grepl("ANP \\(\\d{1,2}\\).xls$",
+              list.files(output_path)
+              )) == 26, T, F)
+  }, error = function(e){
+    print("Last file download is not finished")
+    Sys.sleep(1)
+  })
+}
+
+client$close()
+rm(remDr)
+gc()
+
+files_full_path = list.files(output_path, full.names = T)[grepl("ANP.*xls", list.files(output_path))]
 
 treat_table = function(file){
   tabela = read_html(file) %>% 
@@ -76,7 +107,9 @@ treat_table = function(file){
   return(tabela)
 }
 
-bases = lapply(files_full_path[1:2], treat_table)
+bases = lapply(files_full_path, treat_table)
 data = rbindlist(bases)
 
-write.table(data,"~/Downloads/anp_consolidada.txt",sep="\t",row.names = F, quote = F, col.names = T)
+write.table(data, paste0(output_path, "anp_consolidada.txt"), sep="\t", row.names = F, quote = F, col.names = T)
+
+file.remove(files_full_path)
